@@ -39,9 +39,15 @@ void setDeviceState(int pin, bool state) {
   digitalWrite(pin, state ? HIGH : LOW);
 }
 
+// Функция для создания навигационного меню
+String getNavMenu() {
+  return "<nav><a href=\"/\">Главная</a> | <a href=\"/status\">Статус</a></nav>";
+}
+
 // Главная страница веб-сервера
 void handleRoot() {
   String html = "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"UTF-8\"><title>Управление устройствами</title></head><body>";
+  html += getNavMenu();
   html += "<h1>Управление устройствами</h1>";
   html += "<form action=\"/set\" method=\"POST\">";
   html += "Время включения света (час): <input type=\"number\" name=\"lightOnHour\" value=\"" + String(lightOnHour) + "\"><br>";
@@ -75,12 +81,12 @@ void handleStatus() {
   String fanStatus = (digitalRead(fanPin) == HIGH) ? "Включен" : "Выключен";
 
   String html = "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"UTF-8\"><title>Статус устройств</title></head><body>";
+  html += getNavMenu();
   html += "<h1>Статус устройств</h1>";
   html += "<p>Текущее время: " + currentTime + "</p>";
   html += "<p>Свет: " + lightStatus + "</p>";
   html += "<p>Полив: " + pumpStatus + "</p>";
   html += "<p>Вентилятор: " + fanStatus + "</p>";
-  html += "<p><a href=\"/\">Назад</a></p>";
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
@@ -100,7 +106,7 @@ void handleSet() {
 
   if (server.hasArg("fanPeriodicity")) fanPeriodicity = server.arg("fanPeriodicity").toInt();
   if (server.hasArg("fanDuration")) fanDuration = server.arg("fanDuration").toInt();
-  server.send(200, "text/html", "<h1>Настройки сохранены</h1><a href=\"/\">Назад</a>");
+  server.send(200, "text/html", "<h1>Настройки сохранены</h1>" + getNavMenu());
 }
 
 void setup() {
