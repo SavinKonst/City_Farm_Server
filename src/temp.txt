@@ -1,0 +1,3 @@
+// Данные для подключения к WiFi
+const char* ssid = "Intersvyaz-F036";
+const char* password = "73334026";
