@@ -2,6 +2,8 @@
 #include <ESP8266WebServer.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <ESP8266HTTPClient.h>
+#include <ArduinoJson.h>
 
 // Данные для подключения к WiFi
 const char* ssid = "Intersvyaz-F036";
@@ -33,6 +35,9 @@ int pumpDuration2 = 5; // В минутах
 
 int fanPeriodicity = 2; // В часах
 int fanDuration = 10; // В минутах
+
+// Прототип функции определения часового пояса
+void determineTimeZone();
 
 // Функция для установки состояния устройства
 void setDeviceState(int pin, bool state) {
@@ -162,6 +167,9 @@ void setup() {
   Serial.print("IP-адрес: ");
   Serial.println(WiFi.localIP());
 
+  // Автоматическое определение часового пояса
+  determineTimeZone();
+
   // Настройка времени через NTP
   timeClient.begin();
   timeClient.update();
@@ -229,4 +237,30 @@ void loop() {
     setDeviceState(fanPin, false);
     fanRunning = false;
   }
+}
+
+void determineTimeZone() {
+  HTTPClient http;
+  WiFiClient client;
+  http.begin(client, "http://worldtimeapi.org/api/ip");  // Использование нового синтаксиса
+  int httpCode = http.GET();
+
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    Serial.println(payload);
+
+    StaticJsonDocument<1024> doc;
+    deserializeJson(doc, payload);
+    String timezone = doc["timezone"];
+    int gmtOffset = doc["raw_offset"].as<int>();
+    int dstOffset = doc["dst_offset"].as<int>();
+
+    int totalOffset = gmtOffset + dstOffset;
+    timeClient.setTimeOffset(totalOffset);
+    Serial.println("Часовой пояс установлен: " + timezone + " (GMT offset: " + String(gmtOffset) + ", DST offset: " + String(dstOffset) + ")");
+  } else {
+    Serial.println("Не удалось определить часовой пояс");
+  }
+
+  http.end();
 }
