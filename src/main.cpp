@@ -2,8 +2,8 @@
 #include <ESP8266WebServer.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>
+#include <ESP8266HTTPClient.h>
 
 // Данные для подключения к WiFi
 const char* ssid = "Intersvyaz-F036";
@@ -36,8 +36,36 @@ int pumpDuration2 = 5; // В минутах
 int fanPeriodicity = 2; // В часах
 int fanDuration = 10; // В минутах
 
-// Прототип функции определения часового пояса
-void determineTimeZone();
+// Переменные для ручного управления
+bool manualLightState = false;
+bool manualPumpState = false;
+bool manualFanState = false;
+
+void determineTimeZone() {
+  HTTPClient http;
+  WiFiClient client;
+  http.begin(client, "http://worldtimeapi.org/api/ip");  // Использование нового синтаксиса
+  int httpCode = http.GET();
+
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    Serial.println(payload);
+
+    StaticJsonDocument<1024> doc;
+    deserializeJson(doc, payload);
+    String timezone = doc["timezone"];
+    int gmtOffset = doc["raw_offset"].as<int>();
+    int dstOffset = doc["dst_offset"].as<int>();
+
+    int totalOffset = gmtOffset + dstOffset;
+    timeClient.setTimeOffset(totalOffset);
+    Serial.println("Часовой пояс установлен: " + timezone + " (GMT offset: " + String(gmtOffset) + ", DST offset: " + String(dstOffset) + ")");
+  } else {
+    Serial.println("Не удалось определить часовой пояс");
+  }
+
+  http.end();
+}
 
 // Функция для установки состояния устройства
 void setDeviceState(int pin, bool state) {
@@ -46,7 +74,7 @@ void setDeviceState(int pin, bool state) {
 
 // Функция для создания навигационного меню
 String getNavMenu() {
-  return "<nav><a href=\"/\">Главная</a> | <a href=\"/status\">Статус</a></nav>";
+  return "<nav><a href=\"/\">Главная</a> | <a href=\"/status\">Статус</a> | <a href=\"/manual\">Ручное управление</a></nav>";
 }
 
 // Главная страница веб-сервера
@@ -128,6 +156,21 @@ void handleStatus() {
   server.send(200, "text/html", html);
 }
 
+// Страница ручного управления
+void handleManual() {
+  String html = "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"UTF-8\"><title>Ручное управление</title></head><body>";
+  html += getNavMenu();
+  html += "<h1>Ручное управление устройствами</h1>";
+  html += "<form action=\"/manualSet\" method=\"POST\">";
+  html += "Свет: <input type=\"checkbox\" name=\"lightState\" " + String(manualLightState ? "checked" : "") + "><br>";
+  html += "Полив: <input type=\"checkbox\" name=\"pumpState\" " + String(manualPumpState ? "checked" : "") + "><br>";
+  html += "Вентилятор: <input type=\"checkbox\" name=\"fanState\" " + String(manualFanState ? "checked" : "") + "><br>";
+  html += "<input type=\"submit\" value=\"Управлять\">";
+  html += "</form>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
 // Обработка формы настроек
 void handleSet() {
   if (server.hasArg("lightOnHour")) lightOnHour = server.arg("lightOnHour").toInt();
@@ -143,7 +186,30 @@ void handleSet() {
 
   if (server.hasArg("fanPeriodicity")) fanPeriodicity = server.arg("fanPeriodicity").toInt();
   if (server.hasArg("fanDuration")) fanDuration = server.arg("fanDuration").toInt();
-  server.send(200, "text/html", "<h1>Настройки сохранены</h1>" + getNavMenu());
+  String html = "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"UTF-8\"><title>Ручное управление</title></head><body>";
+  html += getNavMenu();
+  html += "<h1>Настройки сохранены</h1>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);}
+
+// Обработка формы ручного управления
+void handleManualSet() {
+  manualLightState = server.hasArg("lightState");
+  manualPumpState = server.hasArg("pumpState");
+  manualFanState = server.hasArg("fanState");
+
+  setDeviceState(lightPin, manualLightState);
+  setDeviceState(pumpPin, manualPumpState);
+  setDeviceState(fanPin, manualFanState);
+  
+  handleManual();
+/*
+  String html = "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"UTF-8\"><title>Ручное управление</title></head><body>";
+  html += getNavMenu();
+  html += "<h1>Управление выполнено</h1>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+  */
 }
 
 void setup() {
@@ -167,17 +233,17 @@ void setup() {
   Serial.print("IP-адрес: ");
   Serial.println(WiFi.localIP());
 
-  // Автоматическое определение часового пояса
-  determineTimeZone();
-
   // Настройка времени через NTP
   timeClient.begin();
+  determineTimeZone(); // Определение часового пояса
   timeClient.update();
 
   // Настройка обработчиков HTTP-запросов
   server.on("/", handleRoot);
   server.on("/status", handleStatus);
   server.on("/set", handleSet);
+  server.on("/manual", handleManual);
+  server.on("/manualSet", handleManualSet);
   server.begin();
   Serial.println("HTTP-сервер запущен");
 }
@@ -191,10 +257,15 @@ void loop() {
   int currentMinute = timeClient.getMinutes();
 
   // Управление светом
-  if (currentHour >= lightOnHour && currentHour < lightOffHour) {
-    setDeviceState(lightPin, true);
-  } else {
-    setDeviceState(lightPin, false);
+   static bool lightRunning = false;
+  if (!manualLightState) {
+    if (currentHour >= lightOnHour && currentHour < lightOffHour && !lightRunning) {
+      setDeviceState(lightPin, true);
+      lightRunning = true;
+    } 
+  /*  else {
+      setDeviceState(lightPin, false);
+    }*/
   }
 
   // Управление поливом
@@ -203,64 +274,43 @@ void loop() {
   static bool pumpRunning2 = false;
   static unsigned long pumpStartTime2 = 0;
 
-  if (currentHour == pumpStartHour1 && currentMinute == pumpStartMinute1 && !pumpRunning1) {
-    setDeviceState(pumpPin, true);
-    pumpRunning1 = true;
-    pumpStartTime1 = millis();
-  }
-  if (pumpRunning1 && millis() - pumpStartTime1 >= pumpDuration1 * 60000) {
-    setDeviceState(pumpPin, false);
-    pumpRunning1 = false;
-  }
+  if (!manualPumpState) {
+    if (currentHour == pumpStartHour1 && currentMinute == pumpStartMinute1 && !pumpRunning1) {
+      setDeviceState(pumpPin, true);
+      pumpRunning1 = true;
+      pumpStartTime1 = millis();
+    }
+    if (pumpRunning1 && millis() - pumpStartTime1 >= pumpDuration1 * 60000) {
+      setDeviceState(pumpPin, false);
+      pumpRunning1 = false;
+    }
 
-  if (currentHour == pumpStartHour2 && currentMinute == pumpStartMinute2 && !pumpRunning2) {
-    setDeviceState(pumpPin, true);
-    pumpRunning2 = true;
-    pumpStartTime2 = millis();
-  }
-  if (pumpRunning2 && millis() - pumpStartTime2 >= pumpDuration2 * 60000) {
-    setDeviceState(pumpPin, false);
-    pumpRunning2 = false;
+    if (currentHour == pumpStartHour2 && currentMinute == pumpStartMinute2 && !pumpRunning2) {
+      setDeviceState(pumpPin, true);
+      pumpRunning2 = true;
+      pumpStartTime2 = millis();
+    }
+    if (pumpRunning2 && millis() - pumpStartTime2 >= pumpDuration2 * 60000) {
+      setDeviceState(pumpPin, false);
+      pumpRunning2 = false;
+    }
   }
 
   // Управление вентилятором
   static bool fanRunning = false;
   static unsigned long fanStartTime = 0;
   static unsigned long lastFanStart = 0;
-  if (millis() - lastFanStart >= fanPeriodicity * 3600000) {
-    setDeviceState(fanPin, true);
-    fanRunning = true;
-    fanStartTime = millis();
-    lastFanStart = millis();
-  }
-  if (fanRunning && millis() - fanStartTime >= fanDuration * 60000) {
-    setDeviceState(fanPin, false);
-    fanRunning = false;
+  if (!manualFanState) {
+    if (millis() - lastFanStart >= fanPeriodicity * 3600000) {
+      setDeviceState(fanPin, true);
+      fanRunning = true;
+      fanStartTime = millis();
+      lastFanStart = millis();
+    }
+    if (fanRunning && millis() - fanStartTime >= fanDuration * 60000) {
+      setDeviceState(fanPin, false);
+      fanRunning = false;
+    }
   }
 }
 
-void determineTimeZone() {
-  HTTPClient http;
-  WiFiClient client;
-  http.begin(client, "http://worldtimeapi.org/api/ip");  // Использование нового синтаксиса
-  int httpCode = http.GET();
-
-  if (httpCode == HTTP_CODE_OK) {
-    String payload = http.getString();
-    Serial.println(payload);
-
-    StaticJsonDocument<1024> doc;
-    deserializeJson(doc, payload);
-    String timezone = doc["timezone"];
-    int gmtOffset = doc["raw_offset"].as<int>();
-    int dstOffset = doc["dst_offset"].as<int>();
-
-    int totalOffset = gmtOffset + dstOffset;
-    timeClient.setTimeOffset(totalOffset);
-    Serial.println("Часовой пояс установлен: " + timezone + " (GMT offset: " + String(gmtOffset) + ", DST offset: " + String(dstOffset) + ")");
-  } else {
-    Serial.println("Не удалось определить часовой пояс");
-  }
-
-  http.end();
-}
