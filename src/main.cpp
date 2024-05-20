@@ -80,13 +80,45 @@ void handleStatus() {
   String pumpStatus = (digitalRead(pumpPin) == HIGH) ? "Включен" : "Выключен";
   String fanStatus = (digitalRead(fanPin) == HIGH) ? "Включен" : "Выключен";
 
+  // Вычисляем время следующего включения света
+  int nextLightOnHour = lightOnHour;
+  if (currentHour >= lightOnHour && currentHour < lightOffHour) {
+    nextLightOnHour = (lightOffHour <= 23) ? lightOffHour + 1 : 0;
+  }
+  String nextLightOn = String(nextLightOnHour) + ":00";
+
+  // Вычисляем время следующего включения полива
+  String nextPumpOn;
+  if (currentHour < pumpStartHour1 || (currentHour == pumpStartHour1 && currentMinute < pumpStartMinute1)) {
+    nextPumpOn = String(pumpStartHour1) + ":" + (pumpStartMinute1 < 10 ? "0" : "") + String(pumpStartMinute1);
+  } else if (currentHour < pumpStartHour2 || (currentHour == pumpStartHour2 && currentMinute < pumpStartMinute2)) {
+    nextPumpOn = String(pumpStartHour2) + ":" + (pumpStartMinute2 < 10 ? "0" : "") + String(pumpStartMinute2);
+  } else {
+    nextPumpOn = String(pumpStartHour1) + ":" + (pumpStartMinute1 < 10 ? "0" : "") + String(pumpStartMinute1);
+  }
+
+  // Вычисляем время следующего включения вентилятора
+  unsigned long currentMillis = millis();
+  unsigned long nextFanMillis = ((currentMillis / (fanPeriodicity * 3600000)) + 1) * (fanPeriodicity * 3600000);
+  unsigned long nextFanOnTime = nextFanMillis - currentMillis;
+  int nextFanOnHour = currentHour + (nextFanOnTime / 3600000);
+  int nextFanOnMinute = currentMinute + ((nextFanOnTime % 3600000) / 60000);
+  if (nextFanOnMinute >= 60) {
+    nextFanOnMinute -= 60;
+    nextFanOnHour += 1;
+  }
+  if (nextFanOnHour >= 24) {
+    nextFanOnHour -= 24;
+  }
+  String nextFanOn = String(nextFanOnHour) + ":" + (nextFanOnMinute < 10 ? "0" : "") + String(nextFanOnMinute);
+
   String html = "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"UTF-8\"><title>Статус устройств</title></head><body>";
   html += getNavMenu();
   html += "<h1>Статус устройств</h1>";
   html += "<p>Текущее время: " + currentTime + "</p>";
-  html += "<p>Свет: " + lightStatus + "</p>";
-  html += "<p>Полив: " + pumpStatus + "</p>";
-  html += "<p>Вентилятор: " + fanStatus + "</p>";
+  html += "<p>Свет: " + lightStatus + ". Следующее включение в " + nextLightOn + "</p>";
+  html += "<p>Полив: " + pumpStatus + ". Следующее включение в " + nextPumpOn + "</p>";
+  html += "<p>Вентилятор: " + fanStatus + ". Следующее включение в " + nextFanOn + "</p>";
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
